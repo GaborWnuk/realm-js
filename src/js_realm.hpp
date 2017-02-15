@@ -412,7 +412,7 @@ void RealmClass<T>::constructor(ContextType ctx, ObjectType this_object, size_t 
     config.path = normalize_path(config.path);
     ensure_directory_exists_for_file(config.path);
 
-    config.execution_context = reinterpret_cast<AbstractExecutionContextID>(Context<T>::get_execution_context_id(ctx));
+    config.execution_context = Context<T>::get_execution_context_id(ctx);
 
     SharedRealm realm = realm::Realm::get_shared_realm(config);
     GlobalContextType global_context = Context<T>::get_global_context(ctx);
