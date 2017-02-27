@@ -48,13 +48,6 @@
 			remoteGlobalIDString = F63FF2F01C16405C00B3B8E0;
 			remoteInfo = GCDWebServers;
 		};
-		F68759FC1D21949A007471AB /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = F60690231CA277CC0003FB26 /* RealmJS.xcodeproj */;
-			proxyType = 2;
-			remoteGlobalIDString = F62BF8FB1CAC71780022BCDC;
-			remoteInfo = RealmNode;
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -122,7 +115,6 @@
 			children = (
 				F68759FB1D21949A007471AB /* libGCDWebServers.a */,
 				F606902F1CA277CD0003FB26 /* libRealmJS.a */,
-				F68759FD1D21949A007471AB /* libRealmNode.dylib */,
 				F60690331CA277CD0003FB26 /* RealmJSTests.xctest */,
 			);
 			name = Products;
@@ -208,13 +200,6 @@
 			remoteRef = F68759FA1D21949A007471AB /* PBXContainerItemProxy */;
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
-		F68759FD1D21949A007471AB /* libRealmNode.dylib */ = {
-			isa = PBXReferenceProxy;
-			fileType = "compiled.mach-o.dylib";
-			path = libRealmNode.dylib;
-			remoteRef = F68759FC1D21949A007471AB /* PBXContainerItemProxy */;
-			sourceTree = BUILT_PRODUCTS_DIR;
-		};
 /* End PBXReferenceProxy section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -243,6 +228,70 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		D15893161E649D8E00B77F8F /* AdHoc */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CC = "$(SRCROOT)/../../scripts/ccache-clang.sh";
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "iPhone Developer";
+				COPY_PHASE_STRIP = NO;
+				CXX = "$(SRCROOT)/../../scripts/ccache-clang++.sh";
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 7.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				OTHER_CPLUSPLUSFLAGS = (
+					"$(OTHER_CFLAGS)",
+					"-isystem",
+					../../core/include,
+				);
+				SDKROOT = iphoneos;
+				STRIP_INSTALLED_PRODUCT = NO;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = AdHoc;
+		};
+		D15893171E649D8E00B77F8F /* AdHoc */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(SRCROOT)/../../src/**",
+					"$(SRCROOT)/../../vendor/core/include",
+					"$(SRCROOT)/../../vendor/GCDWebServer/GCDWebServer/**",
+					"$(SRCROOT)/../../../react-native/React/**",
+					"$(SRCROOT)/../../tests/react-test-app/node_modules/react-native/React/**",
+					"$(SRCROOT)/../../examples/ReactExample/node_modules/react-native/React/**",
+					"$(SRCROOT)/../../vendor",
+				);
+				OTHER_LIBTOOLFLAGS = "$(BUILT_PRODUCTS_DIR)/libRealmJS.a";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+			};
+			name = AdHoc;
+		};
 		F606901A1CA2766F0003FB26 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -385,6 +434,7 @@
 			buildConfigurations = (
 				F606901A1CA2766F0003FB26 /* Debug */,
 				F606901B1CA2766F0003FB26 /* Release */,
+				D15893161E649D8E00B77F8F /* AdHoc */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -394,6 +444,7 @@
 			buildConfigurations = (
 				F606901D1CA2766F0003FB26 /* Debug */,
 				F606901E1CA2766F0003FB26 /* Release */,
+				D15893171E649D8E00B77F8F /* AdHoc */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
