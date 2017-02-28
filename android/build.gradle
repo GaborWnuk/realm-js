@@ -41,7 +41,7 @@ task forwardDebugPort(type: Exec) {
 
 android {
     compileSdkVersion 23
-    buildToolsVersion "25.0.0"
+    buildToolsVersion "23.0.1"
 
     defaultConfig {
         minSdkVersion 16
