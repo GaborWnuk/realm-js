@@ -66,15 +66,16 @@ stage('build') {
     linux_test_runners: doDockerBuild('test-runners'),
     macos_node_debug: doMacBuild('node Debug'),
     macos_node_release: doMacBuild('node Release'),
-    macos_realmjs_debug: doMacBuild('realmjs Debug'),
-    macos_realmjs_release: doMacBuild('realmjs Release'),
+    //macos_realmjs_debug: doMacBuild('realmjs Debug'),
+    //macos_realmjs_release: doMacBuild('realmjs Release'),
     macos_react_tests_debug: doReactBuild('react-tests Debug'),
     macos_react_tests_release: doReactBuild('react-tests Release'),
     macos_react_example_debug: doMacBuild('react-example Debug'),
     macos_react_example_release: doMacBuild('react-example Release'),
-    android_react_tests: doAndroidBuild('react-tests-android', {
-      junit 'tests/react-test-app/tests.xml'
-    })
+    //android_react_tests: doAndroidBuild('react-tests-android', {
+    //  junit 'tests/react-test-app/tests.xml'
+    //}),
+    windows_node: doWindowsBuild()
   )
 }
 
@@ -122,7 +123,7 @@ def reportStatus(target, state, String message) {
       ],
       reposSource: [$class: 'ManuallyEnteredRepositorySource', url: 'https://github.com/realm/realm-js']
     ])
-  } catch(Exception e) {
+  } catch(Exception err) {
     echo "Error posting to GitHub: ${err}"
   }
 }
@@ -164,7 +165,9 @@ def doDockerInside(script, target, postStep = null) {
 def doAndroidBuild(target, postStep = null) {
   return {
     node('docker && android') {
-      doDockerInside("./scripts/docker-android-wrapper.sh ./scripts/test.sh", target, postStep)
+        timeout(time: 1, unit: 'HOURS') {
+            doDockerInside("./scripts/docker-android-wrapper.sh ./scripts/test.sh", target, postStep)
+        }
     }
   }
 }
@@ -191,6 +194,24 @@ def doReactBuild(target, postStep = null) {
       try {
         lock("${env.NODE_NAME} iOS Simulator") {
           doInside("./scripts/test.sh", target, postStep)
+        }
+      } finally {
+        deleteDir()
+      }
+    }
+  }
+}
+
+def doWindowsBuild() {
+  return {
+    node('windows') {
+      unstash 'source'
+      try {
+        bat 'npm install --build-from-source'
+        dir('tests') {
+          bat 'npm install'
+          bat 'npm run test'
+          junit 'junitresults-*.xml'
         }
       } finally {
         deleteDir()

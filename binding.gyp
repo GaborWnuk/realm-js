@@ -4,8 +4,8 @@
     "realm_download_binaries%": "1"
   },
   "includes": [
-    "src/node/gyp/target_defaults.gypi",
-    "src/node/gyp/realm.gyp"
+    "target_defaults.gypi",
+    "realm.gypi"
   ],
   "targets": [
     {
@@ -43,6 +43,7 @@
         "src/object-store/external/pegtl"
       ],
       "sources": [
+        "src/object-store/src/binding_callback_thread_observer.cpp",
         "src/object-store/src/collection_notifications.cpp",
         "src/object-store/src/index_set.cpp",
         "src/object-store/src/list.cpp",
@@ -66,6 +67,11 @@
         "src/object-store/src/util/format.cpp",
       ],
       "conditions": [
+        ["OS=='win'", {
+          "sources": [
+            "src/object-store/src/impl/windows/external_commit_helper.cpp",
+          ]
+        }],
         ["OS=='linux'", {
           "sources": [
             "src/object-store/src/impl/epoll/external_commit_helper.cpp",
@@ -74,7 +80,9 @@
         ["OS=='mac'", {
           "sources": [
             "src/object-store/src/impl/apple/external_commit_helper.cpp",
-            "src/object-store/src/impl/apple/keychain_helper.cpp"
+            "src/object-store/src/impl/apple/keychain_helper.cpp",
+            "src/object-store/src/sync/impl/apple/network_reachability_observer.cpp",
+            "src/object-store/src/sync/impl/apple/system_configuration.cpp"
           ]
         }],
         ["realm_enable_sync", {

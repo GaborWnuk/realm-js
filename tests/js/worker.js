@@ -22,7 +22,12 @@
 
 class Worker {
     constructor(script, args) {
-        this._process = require('child_process').fork(script, args);
+        let options;
+        if (process.execArgv.find(arg => arg.indexOf("--debug="))) {
+            options = { execArgv: ['--debug=44725'] };
+        }
+
+        this._process = require('child_process').fork(script, args, options);
 
         this._process.on('message', (message) => {
             if (this.onmessage) {
@@ -35,10 +40,17 @@ class Worker {
             this._process.send(message);
         }
     }
-    terminate() {
+    terminate(cb) {
+        if (!cb) {
+            cb = function() { };
+        }
+
         if (this._process) {
+            this._process.once('close', cb);
             this._process.kill();
             delete this._process;
+        } else {
+            cb();
         }
     }
 }

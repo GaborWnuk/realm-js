@@ -9,6 +9,10 @@ export NPM_CONFIG_PROGRESS=false
 TARGET=$1
 CONFIGURATION=${2:-Release}
 
+if echo $CONFIGURATION | grep -i "^Debug$" > /dev/null ; then
+  CONFIGURATION="Debug"
+fi
+
 IOS_SIM_DEVICE=${IOS_SIM_DEVICE:-} # use preferentially, otherwise will be set and re-exported
 ios_sim_default_device_type=${IOS_SIM_DEVICE_TYPE:-iPhone 5s}
 ios_sim_default_ios_version=${IOS_SIM_OS:-iOS 10.1}
@@ -241,8 +245,7 @@ rm -rf ~/.yarn-cache/npm-realm-*
 case "$TARGET" in
 "eslint")
   [[ $CONFIGURATION == 'Debug' ]] && exit 0
-  npm install
-  npm run lint .
+  npm run eslint
   ;;
 "eslint-ci")
   [[ $CONFIGURATION == 'Debug' ]] && exit 0
@@ -251,18 +254,10 @@ case "$TARGET" in
   ;;
 "license-check")
   [[ $CONFIGURATION == 'Debug' ]] && exit 0
-  licenses=$(node_modules/.bin/license-checker --exclude "$ACCEPTED_LICENSES");
-  if [[ $licenses ]]; then
-    echo "Unknown license detected in dependency:"
-    node_modules/.bin/license-checker --exclude "$ACCEPTED_LICENSES"
-    exit 1
-  else
-    echo "All licenses are accepted"
-  fi
+  npm run license-check
   ;;
 "jsdoc")
   [[ $CONFIGURATION == 'Debug' ]] && exit 0
-  npm install
   npm run jsdoc
   ;;
 "realmjs")
@@ -346,7 +341,7 @@ case "$TARGET" in
     npm_tests_cmd="npm run test"
     npm install --build-from-source --realm_enable_sync
   else
-    npm_tests_cmd="npm run test-nosync"
+    npm_tests_cmd="npm run test"
     npm install --build-from-source
   fi
 
@@ -360,32 +355,10 @@ case "$TARGET" in
   popd
   stop_server
   ;;
-"node-nosync")
-  npm install --build-from-source
-
-  # Change to a temp directory.
-  cd "$(mktemp -q -d -t realm.node.XXXXXX)"
-  test_temp_dir=$PWD # set it to be cleaned at exit
-
-  pushd "$SRCROOT/tests"
-  npm install
-  npm run test-nosync
-  popd
-  ;;
 "test-runners")
   # Create a fake realm module that points to the source root so that test-runner tests can require('realm')
-  rm -rf "$SRCROOT/tests/test-runners/node_modules/realm"
-  mkdir -p "$SRCROOT/tests/test-runners/node_modules"
-  ln -s "../../.." "$SRCROOT/tests/test-runners/node_modules/realm"
-
   npm install --build-from-source
-
-  for runner in ava mocha jest; do
-    pushd "$SRCROOT/tests/test-runners/$runner"
-    npm install
-    npm test
-    popd
-  done
+  npm run test-runners
   ;;
 "object-store")
   pushd src/object-store

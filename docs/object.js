@@ -29,4 +29,21 @@ class Object {
      * @since 0.12.0
      */
     isValid() {}
+
+    /**
+     * Returns the schema for the type this object belongs to.
+     * @returns {Realm~ObjectSchema} the schema that describes this object.
+     * @since 1.8.1
+     */
+    objectSchema() {}
+
+    /**
+     * Returns all the objects that link to this object in the specified relationship.
+     * @param {string} objectType - The type of the objects that link to this object's type.
+     * @param {string} property - The name of the property that references objects of this object's type.
+     * @throws {Error} If the relationship is not valid.
+     * @returns {Realm.Results} the objects that link to this object.
+     * @since 1.9.0
+     */
+    linkingObjects(objectType, property) {}
 }

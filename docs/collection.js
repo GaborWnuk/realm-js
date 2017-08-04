@@ -43,6 +43,8 @@ class Collection {
      *   (e.g. `$0`, `$1`, `$2`, …) in the query.
      * @throws {Error} If the query or any other argument passed into this method is invalid.
      * @returns {Realm.Results} filtered according to the provided query.
+     * 
+     * See {@tutorial query-language} for details about the query language.
      * @example
      * let merlots = wines.filtered('variety == "Merlot" && vintage <= $0', maxYear);
      */
@@ -161,6 +163,16 @@ class Collection {
      * @since 0.11.0
      */
     findIndex(callback, thisArg) {}
+
+   /**
+    Finds the index of the given object in the collection.
+    * @param {Realm.Object} [object] - The object to search for in the collection.
+    * @throws {Error} If the argument does not belong to the realm.
+    * @returns {number} representing the index where the object was found, or `-1`
+    *   if not in collection.
+    * @since 1.8.2
+    */
+   indexOf(object) {}
 
     /**
      * @see {@link https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/forEach Array.prototype.forEach}

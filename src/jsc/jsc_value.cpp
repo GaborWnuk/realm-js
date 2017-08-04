@@ -1,6 +1,6 @@
 ////////////////////////////////////////////////////////////////////////////
 //
-// Copyright 2016 Realm Inc.
+// Copyright 2017 Realm Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,21 +16,58 @@
 //
 ////////////////////////////////////////////////////////////////////////////
 
-#pragma once
+#include "jsc_value.hpp"
 
-#include "jsc_class.hpp"
-#include "js_object_accessor.hpp"
+#include "jsc_function.hpp"
+#include "jsc_object.hpp"
 
 namespace realm {
-
-// Specialize a native accessor class for JSC.
-template<>
-class NativeAccessor<jsc::Types::Value, jsc::Types::Context> : public js::NativeAccessor<jsc::Types> {};
-
 namespace js {
 
 template<>
-inline std::string NativeAccessor<jsc::Types>::to_binary(JSContextRef ctx, JSValueRef &value) {
+bool jsc::Value::is_binary(JSContextRef ctx, const JSValueRef &value)
+{
+    static jsc::String s_array_buffer = "ArrayBuffer";
+    static jsc::String s_is_view = "isView";
+
+    JSObjectRef global_object = JSContextGetGlobalObject(ctx);
+    JSObjectRef array_buffer_constructor = jsc::Object::validated_get_constructor(ctx, global_object, s_array_buffer);
+
+    // Value should either be an ArrayBuffer or ArrayBufferView (i.e. TypedArray or DataView).
+    if (JSValueIsInstanceOfConstructor(ctx, value, array_buffer_constructor, nullptr)) {
+        return true;
+    }
+    if (JSObjectRef object = JSValueToObject(ctx, value, nullptr)) {
+        // Check if value is an ArrayBufferView by calling ArrayBuffer.isView(val).
+        JSValueRef is_view = jsc::Object::call_method(ctx, array_buffer_constructor, s_is_view, 1, &object);
+
+        return jsc::Value::to_boolean(ctx, is_view);
+    }
+    return false;
+}
+
+template<>
+JSValueRef jsc::Value::from_binary(JSContextRef ctx, BinaryData data)
+{
+    static jsc::String s_buffer = "buffer";
+    static jsc::String s_uint8_array = "Uint8Array";
+
+    size_t byte_count = data.size();
+    JSValueRef byte_count_value = jsc::Value::from_number(ctx, byte_count);
+    JSObjectRef uint8_array_constructor = jsc::Object::validated_get_constructor(ctx, JSContextGetGlobalObject(ctx), s_uint8_array);
+    JSObjectRef uint8_array = jsc::Function::construct(ctx, uint8_array_constructor, 1, &byte_count_value);
+
+    for (uint32_t i = 0; i < byte_count; i++) {
+        JSValueRef num = jsc::Value::from_number(ctx, data[i]);
+        jsc::Object::set_property(ctx, uint8_array, i, num);
+    }
+
+    return jsc::Object::validated_get_object(ctx, uint8_array, s_buffer);
+}
+
+template<>
+OwnedBinaryData jsc::Value::to_binary(JSContextRef ctx, JSValueRef value)
+{
     static jsc::String s_array_buffer = "ArrayBuffer";
     static jsc::String s_buffer = "buffer";
     static jsc::String s_byte_length = "byteLength";
@@ -67,33 +104,15 @@ inline std::string NativeAccessor<jsc::Types>::to_binary(JSContextRef ctx, JSVal
 
     JSObjectRef uint8_array = jsc::Function::construct(ctx, uint8_array_constructor, uint8_array_argc, uint8_array_arguments);
     uint32_t byte_count = jsc::Object::validated_get_length(ctx, uint8_array);
-    std::string bytes(byte_count, 0);
+    auto buffer = std::make_unique<char[]>(byte_count);
 
     for (uint32_t i = 0; i < byte_count; i++) {
         JSValueRef byteValue = jsc::Object::get_property(ctx, uint8_array, i);
-        bytes[i] = jsc::Value::to_number(ctx, byteValue);
+        buffer[i] = jsc::Value::to_number(ctx, byteValue);
     }
 
-    return bytes;
+    return OwnedBinaryData(std::move(buffer), byte_count);
 }
 
-template<>
-inline JSValueRef NativeAccessor<jsc::Types>::from_binary(JSContextRef ctx, BinaryData data) {
-    static jsc::String s_buffer = "buffer";
-    static jsc::String s_uint8_array = "Uint8Array";
-
-    size_t byte_count = data.size();
-    JSValueRef byte_count_value = jsc::Value::from_number(ctx, byte_count);
-    JSObjectRef uint8_array_constructor = jsc::Object::validated_get_constructor(ctx, JSContextGetGlobalObject(ctx), s_uint8_array);
-    JSObjectRef uint8_array = jsc::Function::construct(ctx, uint8_array_constructor, 1, &byte_count_value);
-
-    for (uint32_t i = 0; i < byte_count; i++) {
-        JSValueRef num = jsc::Value::from_number(ctx, data[i]);
-        jsc::Object::set_property(ctx, uint8_array, i, num);
-    }
-    
-    return jsc::Object::validated_get_object(ctx, uint8_array, s_buffer);
-}
-
-} // js
-} // realm
+} // namespace js
+} // namespace realm

@@ -22,24 +22,30 @@ var Realm = require('realm');
 
 var TESTS = {
     ListTests: require('./list-tests'),
+    LinkingObjectsTests: require('./linkingobjects-tests'),
     ObjectTests: require('./object-tests'),
     RealmTests: require('./realm-tests'),
     ResultsTests: require('./results-tests'),
     QueryTests: require('./query-tests'),
-    EncryptionTests: require('./encryption-tests'),
     MigrationTests: require('./migration-tests')
 };
 
-// If sync is enabled, run the user tests
+// encryption is not supported on windows
+if (!(typeof process === 'object' && process.platform === 'win32')) {
+    TESTS.EncryptionTests = require('./encryption-tests');
+}
+
+// If sync is enabled, run the sync tests
 if (Realm.Sync) {
     TESTS.UserTests = require('./user-tests');
     TESTS.SessionTests = require('./session-tests');
 }
 
-function node_require(module) { return require(module); }
+function node_require(module) { return require(module); }
 
 // If on node, run the async tests
-if (typeof process === 'object' && process + '' === '[object process]') {
+const isNodeProcess = typeof process === 'object' && process + '' === '[object process]';
+if (isNodeProcess) {
     TESTS.AsyncTests = node_require('./async-tests');
 }
 
@@ -68,6 +74,22 @@ exports.registerTests = function(tests) {
     }
 };
 
+exports.prepare = function(done) {
+    if (!isNodeProcess || global.testAdminUserInfo) {
+        done();
+    }
+
+    let helper = require('./admin-user-helper');
+    helper.createAdminUser().then(userInfo => {
+        global.testAdminUserInfo = userInfo;
+        done();
+    })
+        .catch(error => {
+            console.error("Error running admin-user-helper: " + error);
+            done();
+        });
+};
+
 exports.runTest = function(suiteName, testName) {
     var testSuite = TESTS[suiteName];
     var testMethod = testSuite && testSuite[testName];
@@ -75,7 +97,7 @@ exports.runTest = function(suiteName, testName) {
     if (testMethod) {
         // Start fresh in case of a crash in a previous run.
         Realm.clearTestState();
-
+        console.log("Starting test " + testName);
         var promise;
         try {
             promise = testMethod.call(testSuite);
@@ -98,4 +120,4 @@ exports.runTest = function(suiteName, testName) {
     } else if (!testSuite || !(testName in SPECIAL_METHODS)) {
         throw new Error('Missing test: ' + suiteName + '.' + testName);
     }
-};
+}

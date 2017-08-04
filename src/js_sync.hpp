@@ -21,6 +21,7 @@
 #include <list>
 #include <map>
 #include <set>
+#include <regex>
 
 #include "event_loop_dispatcher.hpp"
 #include "platform.hpp"
@@ -51,7 +52,6 @@ class UserClass : public ClassDefinition<T, SharedUser> {
     using Value = js::Value<T>;
     using Function = js::Function<T>;
     using ReturnValue = js::ReturnValue<T>;
-    using NativeAccessor = realm::NativeAccessor<ValueType, ContextType>;
 
 public:
     std::string const name = "User";
@@ -118,12 +118,16 @@ void UserClass<T>::is_admin(ContextType ctx, ObjectType object, ReturnValue &ret
 
 template<typename T>
 void UserClass<T>::create_user(ContextType ctx, FunctionType, ObjectType this_object, size_t argc, const ValueType arguments[], ReturnValue &return_value) {
-    validate_argument_count(argc, 3, 4);
+    validate_argument_count(argc, 3, 5);
     SharedUser *user = new SharedUser(SyncManager::shared().get_user(
-        Value::validated_to_string(ctx, arguments[1]),
-        Value::validated_to_string(ctx, arguments[2]),
-        (std::string)Value::validated_to_string(ctx, arguments[0]),
-        Value::validated_to_boolean(ctx, arguments[3])));
+        Value::validated_to_string(ctx, arguments[1], "identity"),
+        Value::validated_to_string(ctx, arguments[2], "refreshToken"),
+        (std::string)Value::validated_to_string(ctx, arguments[0], "authServerUrl"),
+        Value::validated_to_boolean(ctx, arguments[3], "isAdminToken") ? SyncUser::TokenType::Admin : SyncUser::TokenType::Normal));
+
+    if (argc == 5) {
+        (*user)->set_is_admin(Value::validated_to_boolean(ctx, arguments[4], "isAdmin"));
+    }
     return_value.set(create_object<T, UserClass<T>>(ctx, user));
 }
 
@@ -131,34 +135,12 @@ template<typename T>
 void UserClass<T>::all_users(ContextType ctx, ObjectType object, ReturnValue &return_value) {
     auto users = Object::create_empty(ctx);
     for (auto user : SyncManager::shared().all_logged_in_users()) {
-        if (!user->is_admin()) {
+        if (user->token_type() == SyncUser::TokenType::Normal) {
             Object::set_property(ctx, users, user->identity(), create_object<T, UserClass<T>>(ctx, new SharedUser(user)), ReadOnly | DontDelete);
         }
     }
     return_value.set(users);
 }
-
-/*
-template<typename T>
-void UserClass<T>::current_user(ContextType ctx, ObjectType object, ReturnValue &return_value) {
-    SharedUser *current = nullptr;
-    for (auto user : SyncManager::shared().all_logged_in_users()) {
-        if (!user->is_admin()) {
-            if (current != nullptr) {
-                throw std::runtime_error("More than one user logged in currently.");
-            }
-            current = new SharedUser(user);
-        }
-    }
-
-    if (current != nullptr) {
-        return_value.set(create_object<T, UserClass<T>>(ctx, current));
-    }
-    else {
-        return_value.set_undefined();
-    }
-}
-*/
 
 template<typename T>
 void UserClass<T>::logout(ContextType ctx, FunctionType, ObjectType this_object, size_t, const ValueType[], ReturnValue &) {
@@ -175,12 +157,12 @@ class SessionClass : public ClassDefinition<T, WeakSession> {
     using Object = js::Object<T>;
     using Value = js::Value<T>;
     using ReturnValue = js::ReturnValue<T>;
-    
+
 public:
     std::string const name = "Session";
 
     static FunctionType create_constructor(ContextType);
-    
+
     static void get_config(ContextType, ObjectType, ReturnValue &);
     static void get_user(ContextType, ObjectType, ReturnValue &);
     static void get_url(ContextType, ObjectType, ReturnValue &);
@@ -231,7 +213,7 @@ public:
         arguments[0] = create_object<T, SessionClass<T>>(m_ctx, new WeakSession(session));
         arguments[1] = error_object;
 
-        Function<T>::call(m_ctx, m_func, 2, arguments);
+        Function<T>::callback(m_ctx, m_func, typename T::Object(), 2, arguments);
     }
 private:
     const Protected<typename T::GlobalContext> m_ctx;
@@ -289,7 +271,7 @@ template<typename T>
 void SessionClass<T>::get_state(ContextType ctx, ObjectType object, ReturnValue &return_value) {
     static const std::string invalid("invalid");
     static const std::string inactive("inactive");
-    static const std::string active("active"); 
+    static const std::string active("active");
 
     return_value.set(invalid);
 
@@ -337,7 +319,6 @@ class SyncClass : public ClassDefinition<T, void *> {
     using Value = js::Value<T>;
     using Function = js::Function<T>;
     using ReturnValue = js::ReturnValue<T>;
-    using NativeAccessor = realm::NativeAccessor<ValueType, ContextType>;
 
 public:
     std::string const name = "Sync";
@@ -345,7 +326,6 @@ public:
     static FunctionType create_constructor(ContextType);
 
     static void set_sync_log_level(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
-    static void set_verify_servers_ssl_certificate(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
 
     // private
     static void populate_sync_config(ContextType, ObjectType realm_constructor, ObjectType config_object, Realm::Config&);
@@ -355,7 +335,6 @@ public:
 
     MethodMap<T> const static_methods = {
         {"setLogLevel", wrap<set_sync_log_level>},
-        {"setVerifyServersSslCertificate", wrap<set_verify_servers_ssl_certificate>}
     };
 };
 
@@ -366,7 +345,7 @@ inline typename T::Function SyncClass<T>::create_constructor(ContextType ctx) {
     PropertyAttributes attributes = ReadOnly | DontEnum | DontDelete;
     Object::set_property(ctx, sync_constructor, "User", ObjectWrap<T, UserClass<T>>::create_constructor(ctx), attributes);
     Object::set_property(ctx, sync_constructor, "Session", ObjectWrap<T, SessionClass<T>>::create_constructor(ctx), attributes);
-    
+
     // setup synced realmFile paths
     ensure_directory_exists_for_file(default_realm_file_directory());
     SyncManager::shared().configure_file_system(default_realm_file_directory(), SyncManager::MetadataMode::NoEncryption);
@@ -389,17 +368,12 @@ void SyncClass<T>::set_sync_log_level(ContextType ctx, FunctionType, ObjectType 
 }
 
 template<typename T>
-void SyncClass<T>::set_verify_servers_ssl_certificate(ContextType ctx, FunctionType, ObjectType this_object, size_t argc, const ValueType arguments[], ReturnValue &return_value) {
-    validate_argument_count(argc, 1);
-    bool verify_servers_ssl_certificate = Value::validated_to_boolean(ctx, arguments[0]);
-    realm::SyncManager::shared().set_client_should_validate_ssl(verify_servers_ssl_certificate);
-}
-
-template<typename T>
 void SyncClass<T>::populate_sync_config(ContextType ctx, ObjectType realm_constructor, ObjectType config_object, Realm::Config& config)
 {
     ValueType sync_config_value = Object::get_property(ctx, config_object, "sync");
-    if (!Value::is_undefined(ctx, sync_config_value)) {
+    if (Value::is_boolean(ctx, sync_config_value)) {
+        config.force_sync_history = Value::to_boolean(ctx, sync_config_value);
+    } else if (!Value::is_undefined(ctx, sync_config_value)) {
         auto sync_config_object = Value::validated_to_object(ctx, sync_config_value);
 
         ObjectType sync_constructor = Object::validated_get_object(ctx, realm_constructor, std::string("Sync"));
@@ -408,26 +382,14 @@ void SyncClass<T>::populate_sync_config(ContextType ctx, ObjectType realm_constr
 
         EventLoopDispatcher<SyncBindSessionHandler> bind([protected_ctx, protected_sync](const std::string& path, const realm::SyncConfig& config, std::shared_ptr<SyncSession>) {
             HANDLESCOPE
-            if (config.user->is_admin()) {
-                // FIXME: This log-in callback is called while the object store still holds some sync-related locks.
-                // Notify the object store of the access token asynchronously to avoid the deadlock that would result
-                // from reentering the object store here.
-                auto thread = std::thread([path, config]{
-                    auto session = SyncManager::shared().get_existing_active_session(path);
-                    session->refresh_access_token(config.user->refresh_token(), config.realm_url);
-                });
-                thread.detach();
-            }
-            else {
-                ObjectType user_constructor = Object::validated_get_object(protected_ctx, protected_sync, std::string("User"));
-                FunctionType refreshAccessToken = Object::validated_get_function(protected_ctx, user_constructor, std::string("_refreshAccessToken"));
+            ObjectType user_constructor = Object::validated_get_object(protected_ctx, protected_sync, std::string("User"));
+            FunctionType refreshAccessToken = Object::validated_get_function(protected_ctx, user_constructor, std::string("_refreshAccessToken"));
 
-                ValueType arguments[3];
-                arguments[0] = create_object<T, UserClass<T>>(protected_ctx, new SharedUser(config.user));
-                arguments[1] = Value::from_string(protected_ctx, path.c_str());
-                arguments[2] = Value::from_string(protected_ctx, config.realm_url.c_str());
-                Function::call(protected_ctx, refreshAccessToken, 3, arguments);
-            }
+            ValueType arguments[3];
+            arguments[0] = create_object<T, UserClass<T>>(protected_ctx, new SharedUser(config.user));
+            arguments[1] = Value::from_string(protected_ctx, path.c_str());
+            arguments[2] = Value::from_string(protected_ctx, config.realm_url.c_str());
+            Function::call(protected_ctx, refreshAccessToken, 3, arguments);
         });
 
         std::function<SyncSessionErrorHandler> error_handler;
@@ -435,7 +397,7 @@ void SyncClass<T>::populate_sync_config(ContextType ctx, ObjectType realm_constr
         if (!Value::is_undefined(ctx, error_func)) {
             error_handler = EventLoopDispatcher<SyncSessionErrorHandler>(SyncSessionErrorHandlerFunctor<T>(ctx, Value::validated_to_function(ctx, error_func)));
         }
-        
+
         ObjectType user = Object::validated_get_object(ctx, sync_config_object, "user");
         SharedUser shared_user = *get_internal<T, UserClass<T>>(user);
         if (shared_user->state() != SyncUser::State::Active) {
@@ -443,13 +405,39 @@ void SyncClass<T>::populate_sync_config(ContextType ctx, ObjectType realm_constr
         }
 
         std::string raw_realm_url = Object::validated_get_string(ctx, sync_config_object, "url");
+        if (shared_user->token_type() == SyncUser::TokenType::Admin) {
+            static std::regex tilde("/~/");
+            raw_realm_url = std::regex_replace(raw_realm_url, tilde, "/__auth/");
+        }
+        
+        bool client_validate_ssl = true;
+        ValueType validate_ssl_temp = Object::get_property(ctx, sync_config_object, "validate_ssl");
+        if (!Value::is_undefined(ctx, validate_ssl_temp)) {
+            client_validate_ssl = Value::validated_to_boolean(ctx, validate_ssl_temp, "validate_ssl");
+        }
+
+        util::Optional<std::string> ssl_trust_certificate_path;
+        ValueType trust_certificate_path_temp = Object::get_property(ctx, sync_config_object, "ssl_trust_certificate_path");
+         if (!Value::is_undefined(ctx, trust_certificate_path_temp)) {
+            ssl_trust_certificate_path = std::string(Value::validated_to_string(ctx, trust_certificate_path_temp, "ssl_trust_certificate_path"));
+        }
+        else {
+            ssl_trust_certificate_path = util::none;
+        }
 
         // FIXME - use make_shared
         config.sync_config = std::shared_ptr<SyncConfig>(new SyncConfig{shared_user, raw_realm_url,
                                                                         SyncSessionStopPolicy::AfterChangesUploaded,
-                                                                        std::move(bind), std::move(error_handler)});
+                                                                        std::move(bind), std::move(error_handler),
+                                                                        nullptr, util::none,
+                                                                        client_validate_ssl, ssl_trust_certificate_path});
         config.schema_mode = SchemaMode::Additive;
         config.path = realm::SyncManager::shared().path_for_realm(shared_user->identity(), raw_realm_url);
+
+        if (!config.encryption_key.empty()) {
+            config.sync_config->realm_encryption_key = std::array<char, 64>();
+            std::copy_n(config.encryption_key.begin(), config.sync_config->realm_encryption_key->size(), config.sync_config->realm_encryption_key->begin());
+        }
     }
 }
 

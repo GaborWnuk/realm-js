@@ -1,10 +1,136 @@
-1.0.3 Release notes
+1.10.1 Release notes (2017-8-2)
 =============================================================
 ### Breaking changes
 * None
 
 ### Enhancements
 * None
+
+### Bug fixes
+* `Realm.openAsync` will no longer open the realm if a sync error has occured. Previously this resulted in the callback being invoked twice - once with an error and a second time - with the synchronously opened Realm.
+* Database adapters will no longer process the sync history of realm files that are not requested by the adapter configuration. Previously this would lead to crashes for realm files that contained schemas that don't define primary keys.
+
+1.10.0 Release notes (2017-7-12)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* Added `Realm.prototype.empty` which is a property that indicates whether or not the realm has any objects in it.
+
+### Bug fixes
+* Fix crash on Node.js when a listener callback throws an error.
+  The error will now be forwarded to Node's fatal error handling facilities. This means better error reporting,
+  the ability to debug such errors in a Node.js debugger, and proper invocation of the `uncaughtError` event on the `process` object.
+
+1.9.0 Release notes (2017-7-10)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* Add support for iOS React Native 0.46. Thanks [@ovr](https://github.com/ovr)!
+* Add support for Linking Objects (AKA Backlinks).
+* Add support for retrieving user account information.
+* Add optional `server` parameter to `Realm.Sync.User.adminUser`
+  Specifying the server address the same way as in `Realm.Sync.User.login` allows the admin token user to use the permission realm APIs.
+
+### Bug fixes
+* Fix regression where setting a Results or List object to a `list` property would throw.
+
+1.8.3 Release notes (2017-6-27)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* None
+
+### Bug fixes
+* Fix admin users not appearing in `Realm.Sync.User.all`, which broke getting an access token for them.
+
+1.8.2 Release notes (2017-6-26)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* Added `indexOf()` method on `Realm.Results` and `Realm.List` that returns the index of the object in the collection.
+
+### Bug fixes
+* Fix opening synced realms with a logged-in admin user. 
+
+1.8.1 Release notes (2017-6-20)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* Accessing `Realm.Sync` when sync is not enabled will no longer throw, but return `undefined`.
+* Better error messages when creating objects.
+* Added bundled TypeScript declarations of the Realm API.
+* Added `objectSchema()` method on `Realm.Object` that returns the schema for the object.
+
+### Bug fixes
+* Fix `Realm.Sync.User.prototype.isAdmin` returning `false` for logged-in admin users. 
+
+1.8.0 Release notes (2017-6-15)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* Updated core and sync dependencies
+* Unified packaging
+
+### Bug fixes
+* Fix crash when used with the React Native C++ bridge
+* Fix `Realm.open` and `Realm.asyncOpen` missing when in the React Native debugger
+
+1.3.1 Release notes (2017-5-18)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* Add Realm open async API support.
+
+### Bug fixes
+* None
+
+
+1.3.0 Release notes (2017-5-11)
+=============================================================
+### Breaking changes
+* Files written by Realm this version cannot be read by earlier versions of Realm.
+Old files can still be opened and files open in read-only mode will not be modified.
+* The `setVerifyServersSslCertificate` method has been deleted
+* The SyncConfig now gets two more optional parameters, `validate_ssl` and `ssl_trust_certificate_path`.
+
+### Enhancements
+* None
+
+### Bug fixes
+* None
+
+1.2.0 Release notes (2017-3-28)
+=============================================================
+### Breaking changes
+* This version is not compatible with versions of the Realm Object Server lower than 1.3.0.
+
+### Enhancements
+* None.
+
+### Bug fixes
+* Fixed bug where opening synced realms with an encryption key would fail.
+
+1.1.1 Release notes (2017-3-9)
+=============================================================
+### Breaking changes
+* None
+
+### Enhancements
+* Add support for Node.js on Windows (#863).
 
 ### Bug fixes
 * Fixed an error when installing Realm React Native module on Windows (#799).

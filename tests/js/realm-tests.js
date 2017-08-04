@@ -22,6 +22,11 @@ var Realm = require('realm');
 var TestCase = require('./asserts');
 var schemas = require('./schemas');
 
+let pathSeparator = '/';
+if (typeof process === 'object' && process.platform === 'win32') {
+    pathSeparator = '\\';
+}
+
 module.exports = {
     testRealmConstructor: function() {
         var realm = new Realm({schema: []});
@@ -45,7 +50,7 @@ module.exports = {
         var defaultRealm2 = new Realm();
         TestCase.assertEqual(defaultRealm2.path, Realm.defaultPath);
 
-        var defaultDir = Realm.defaultPath.substring(0, Realm.defaultPath.lastIndexOf("/") + 1)
+        var defaultDir = Realm.defaultPath.substring(0, Realm.defaultPath.lastIndexOf(pathSeparator) + 1)
         var testPath = 'test1.realm';
         var realm = new Realm({schema: [], path: testPath});
         TestCase.assertEqual(realm.path, defaultDir + testPath);
@@ -118,6 +123,43 @@ module.exports = {
         TestCase.assertThrows(function() {
             new Realm({schema: [{properties: {intCol: 'int'}}]});
         }, 'The schema should be an array of ObjectSchema objects');
+
+        // linkingObjects property where the source property is missing
+        TestCase.assertThrows(function() {
+            new Realm({schema: [{
+                name: 'InvalidObject',
+                properties: {
+                    linkingObjects: {type:'linkingObjects', objectType: 'InvalidObject', property: 'nosuchproperty'}
+                }
+            }]});
+        }, "Property 'InvalidObject.nosuchproperty' declared as origin of linking objects property 'InvalidObject.linkingObjects' does not exist");
+
+        // linkingObjects property where the source property is not a link
+        TestCase.assertThrows(function() {
+            new Realm({schema: [{
+                name: 'InvalidObject',
+                properties: {
+                    integer: 'int',
+                    linkingObjects: {type:'linkingObjects', objectType: 'InvalidObject', property: 'integer'}
+                }
+            }]});
+        }, "Property 'InvalidObject.integer' declared as origin of linking objects property 'InvalidObject.linkingObjects' is not a link")
+        
+        // linkingObjects property where the source property links elsewhere
+        TestCase.assertThrows(function() {
+            new Realm({schema: [{
+                name: 'InvalidObject',
+                properties: {
+                    link: 'IntObject',
+                    linkingObjects: {type:'linkingObjects', objectType: 'InvalidObject', property: 'link'}
+                }
+            }, {
+                name: 'IntObject',
+                properties: {
+                    integer: 'int'
+                }
+            }]});
+        }, "Property 'InvalidObject.link' declared as origin of linking objects property 'InvalidObject.linkingObjects' links to type 'IntObject'")
     },
 
     testRealmConstructorReadOnly: function() {
@@ -150,7 +192,7 @@ module.exports = {
         TestCase.assertEqual(defaultRealm.path, Realm.defaultPath);
 
         try {
-            var newPath = Realm.defaultPath.substring(0, defaultPath.lastIndexOf('/') + 1) + 'default2.realm';
+            var newPath = Realm.defaultPath.substring(0, defaultPath.lastIndexOf(pathSeparator) + 1) + 'default2.realm';
             Realm.defaultPath = newPath;
             defaultRealm = new Realm({schema: []});
             TestCase.assertEqual(defaultRealm.path, newPath, "should use updated default realm path");
@@ -170,22 +212,10 @@ module.exports = {
         realm = new Realm({schema: [], schemaVersion: 2, path: 'another.realm'});
         TestCase.assertEqual(realm.schemaVersion, 2);
         TestCase.assertEqual(Realm.schemaVersion('another.realm'), 2);
-
-        var encryptionKey = new Int8Array(64);
-        realm = new Realm({schema: [], schemaVersion: 3, path: 'encrypted.realm', encryptionKey: encryptionKey});
-        TestCase.assertEqual(realm.schemaVersion, 3);
-        TestCase.assertEqual(Realm.schemaVersion('encrypted.realm', encryptionKey), 3);
-
-        TestCase.assertThrows(function() {
-            Realm.schemaVersion('encrypted.realm', encryptionKey, 'extra');
-        });
-        TestCase.assertThrows(function() {
-            Realm.schemaVersion('encrypted.realm', 'asdf');
-        });
     },
 
     testRealmWrite: function() {
-        var realm = new Realm({schema: [schemas.IntPrimary, schemas.AllTypes, schemas.TestObject]});
+        var realm = new Realm({schema: [schemas.IntPrimary, schemas.AllTypes, schemas.TestObject, schemas.LinkToAllTypes]});
             
         // exceptions should be propogated
         TestCase.assertThrows(function() {
@@ -278,7 +308,7 @@ module.exports = {
     },
 
     testRealmCreateUpsert: function() {
-        var realm = new Realm({schema: [schemas.IntPrimary, schemas.StringPrimary, schemas.AllTypes, schemas.TestObject]});
+        var realm = new Realm({schema: [schemas.IntPrimary, schemas.StringPrimary, schemas.AllTypes, schemas.TestObject, schemas.LinkToAllTypes]});
         realm.write(function() {
             var values = {
                 primaryCol: '0',
@@ -796,7 +826,7 @@ module.exports = {
 
     testSchema: function() {
         var originalSchema = [schemas.TestObject, schemas.BasicTypes, schemas.NullableBasicTypes, schemas.IndexedTypes, schemas.IntPrimary, 
-            schemas.PersonObject, schemas.LinkTypes];
+            schemas.PersonObject, schemas.LinkTypes, schemas.LinkingObjectsObject];
         
         var schemaMap = {};
         originalSchema.forEach(function(objectSchema) {
@@ -832,6 +862,11 @@ module.exports = {
                 }
                 else if (prop1.type == 'list') {
                     TestCase.assertEqual(prop1.objectType, prop2.objectType);    
+                    TestCase.assertEqual(prop1.optional, undefined);
+                }
+                else if (prop1.type == 'linking objects') {
+                    TestCase.assertEqual(prop1.objectType, prop2.objectType);
+                    TestCase.assertEqual(prop1.property, prop2.property);
                     TestCase.assertEqual(prop1.optional, undefined);
                 }
                 else {
@@ -876,5 +911,37 @@ module.exports = {
                 p1.age = "Ten";
             });
         }, new Error("PersonObject.age must be of type: number"));
+    },
+
+    testErrorMessageFromInvalidCreate: function() {
+        var realm = new Realm({schema: [schemas.PersonObject]});
+
+        TestCase.assertThrowsException(function() {
+            realm.write(function () {
+                var p1 = realm.create('PersonObject', { name: 'Ari', age: 'Ten' });
+            });
+        }, new Error("PersonObject.age must be of type: number"));
+    },
+
+    testValidTypesForListProperties: function() {
+        var realm = new Realm({schema: [schemas.PersonObject]});
+        realm.write(function () {
+            var p1 = realm.create('PersonObject', { name: 'Ari', age: 10 });
+            var p2 = realm.create('PersonObject', { name: 'Harold', age: 55, children: realm.objects('PersonObject').filtered('age < 15') });
+            TestCase.assertEqual(p2.children.length, 1);
+            var p3 = realm.create('PersonObject', { name: 'Wendy', age: 52, children: p2.children });
+            TestCase.assertEqual(p3.children.length, 1);
+        });
+    },
+
+    testEmpty: function() {
+        const realm = new Realm({schema: [schemas.PersonObject]});
+        TestCase.assertTrue(realm.empty);
+
+        realm.write(() => realm.create('PersonObject', { name: 'Ari', age: 10 }));
+        TestCase.assertTrue(!realm.empty);
+
+        realm.write(() => realm.delete(realm.objects('PersonObject')));
+        TestCase.assertTrue(realm.empty);
     }
 };

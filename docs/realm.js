@@ -23,6 +23,14 @@
  * ```
  */
 class Realm {
+   /**
+    * Indicates if this Realm contains any objects.
+    * @type {boolean}
+    * @readonly
+    * @since 1.10.0
+    */
+    get empty() {}
+
     /**
      * The path to the file where this Realm is stored.
      * @type {string}
@@ -76,6 +84,23 @@ class Realm {
     constructor(config) {}
 
     /**
+     * Open a realm asynchronously with a promise. If the realm is synced, it will be fully 
+     * synchronized before it is available.
+     * @param {Realm~Configuration} config 
+     * @returns {Promise} - a promise that will be resolved with the realm instance when it's available.
+     */
+    static open(config) {}
+
+    /**
+     * Open a realm asynchronously with a callback. If the realm is synced, it will be fully 
+     * synchronized before it is available.
+     * @param {Realm~Configuration} config 
+     * @param  {callback(error, realm)} - will be called when the realm is ready.
+     * @throws {Error} If anything in the provided `config` is invalid.
+     */
+    static openAsync(config, callback) {}
+
+    /**
      * Closes this Realm so it may be re-opened with a newer schema version.
      * All objects and collections from this Realm are no longer valid after calling this method.
      */
@@ -127,7 +152,7 @@ class Realm {
      * Add a listener `callback` for the specified event `name`.
      * @param {string} name - The name of event that should cause the callback to be called.
      *   _Currently, only the "change" event supported_.
-     * @param {function(Realm, string)} callback - Function to be called when the event occurs.
+     * @param {callback(Realm, string)} callback - Function to be called when the event occurs.
      *   Each callback will only be called once per event, regardless of the number of times
      *   it was added.
      * @throws {Error} If an invalid event `name` is supplied, or if `callback` is not a function.
@@ -138,7 +163,7 @@ class Realm {
     * Remove the listener `callback` for the specfied event `name`.
     * @param {string} name - The event name.
     *   _Currently, only the "change" event supported_.
-    * @param {function(Realm, string)} callback - Function that was previously added as a
+    * @param {callback(Realm, string)} callback - Function that was previously added as a
     *   listener for this event through the {@link Realm#addListener addListener} method.
     * @throws {Error} If an invalid event `name` is supplied, or if `callback` is not a function.
     */
@@ -182,7 +207,7 @@ Realm.defaultPath;
  * @type {Object}
  * @property {ArrayBuffer|ArrayBufferView} [encryptionKey] - The 512-bit (64-byte) encryption
  *   key used to encrypt and decrypt all data in the Realm.
- * @property {function(Realm, Realm)} [migration] - The function to run if a migration is needed.
+ * @property {callback(Realm, Realm)} [migration] - The function to run if a migration is needed.
  *   This function should provide all the logic for converting data models from previous schemas
  *   to the new schema.
  *   This function takes two arguments:
@@ -224,8 +249,10 @@ Realm.defaultPath;
  * @typedef Realm~ObjectSchemaProperty
  * @type {Object}
  * @property {Realm~PropertyType} type - The type of this property.
- * @property {string} [objectType] - **Required**  when `type` is `"list"`, and must match the
- *   type of an object in the same schema.
+ * @property {string} [objectType] - **Required**  when `type` is `"list"` or `"linkingObjects"`,
+ *   and must match the type of an object in the same schema.
+ * @property {string} [property] - **Required** when `type` is `"linkingObjects"`, and must match
+ *   the name of a property on the type specified in `objectType` that links to the type this property belongs to.
  * @property {any} [default] - The default value for this property on creation when not
  *   otherwise specified.
  * @property {boolean} [optional] - Signals if this property may be assigned `null` or `undefined`.
@@ -245,7 +272,7 @@ Realm.defaultPath;
  * A property type may be specified as one of the standard builtin types, or as an object type
  * inside the same schema.
  * @typedef Realm~PropertyType
- * @type {("bool"|"int"|"float"|"double"|"string"|"date"|"data"|"list"|"<ObjectType>")}
+ * @type {("bool"|"int"|"float"|"double"|"string"|"date"|"data"|"list"|"linkingObjects"|"<ObjectType>")}
  * @property {boolean} "bool" - Property value may either be `true` or `false`.
  * @property {number} "int" - Property may be assigned any number, but will be stored as a
  *   round integer, meaning anything after the decimal will be truncated.
@@ -261,6 +288,9 @@ Realm.defaultPath;
  * @property {Realm.List} "list" - Property may be assigned any ordered collection
  *   (e.g. `Array`, {@link Realm.List}, {@link Realm.Results}) of objects all matching the
  *   `objectType` specified in the {@link Realm~ObjectSchemaProperty ObjectSchemaProperty}.
+ * @property {Realm.Results} "linkingObjects" - Property is read-only and always returns a {@link Realm.Results}
+ *   of all the objects matching the `objectType` that are linking to the current object
+ *   through the `property` relationship specified in {@link Realm~ObjectSchemaProperty ObjectSchemaProperty}.
  * @property {Realm.Object} "<ObjectType>" - A string that matches the `name` of an object in the
  *   same schema (see {@link Realm~ObjectSchema ObjectSchema}) – this property may be assigned
  *   any object of this type from inside the same Realm, and will always be _optional_

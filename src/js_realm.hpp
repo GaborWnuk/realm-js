@@ -44,8 +44,19 @@
 namespace realm {
 namespace js {
 
-template<typename T>
-class Realm;
+static std::string normalize_realm_path(std::string path) {
+#if defined(WIN32) && WIN32
+    if (path.size() > 1 && path[0] != '\\' && path[1] != ':') {
+        path = default_realm_file_directory() + "\\" + path;
+    }
+    std::replace(path.begin(), path.end(), '/', '\\');
+#else
+    if (path.size() && path[0] != '/' && path[0] != '.') {
+        path = default_realm_file_directory() + "/" + path;
+    }
+#endif
+    return path;
+}
 
 template<typename T>
 class RealmClass;
@@ -65,10 +76,6 @@ class RealmDelegate : public BindingContext {
     virtual void did_change(std::vector<ObserverState> const& observers, std::vector<void*> const& invalidated, bool version_changed) {
         notify("change");
     }
-    virtual std::vector<ObserverState> get_observed_rows() {
-        return std::vector<ObserverState>();
-    }
-    virtual void will_change(std::vector<ObserverState> const& observers, std::vector<void*> const& invalidated) {}
 
     RealmDelegate(std::weak_ptr<realm::Realm> realm, GlobalContextType ctx) : m_context(ctx), m_realm(realm) {}
 
@@ -122,7 +129,7 @@ class RealmDelegate : public BindingContext {
 
         std::list<Protected<FunctionType>> notifications_copy(m_notifications);
         for (auto &callback : notifications_copy) {
-            Function<T>::call(m_context, callback, realm_object, 2, arguments);
+            Function<T>::callback(m_context, callback, realm_object, 2, arguments);
         }
     }
 
@@ -145,9 +152,16 @@ class RealmClass : public ClassDefinition<T, SharedRealm, ObservableClass<T>> {
     using Object = js::Object<T>;
     using Value = js::Value<T>;
     using ReturnValue = js::ReturnValue<T>;
-    using NativeAccessor = realm::NativeAccessor<ValueType, ContextType>;
+    using NativeAccessor = realm::js::NativeAccessor<T>;
 
 public:
+    using ObjectDefaultsMap = typename Schema<T>::ObjectDefaultsMap;
+    using ConstructorMap = typename Schema<T>::ConstructorMap;
+    
+    using WaitHandler = void(std::error_code);
+    using ProgressHandler = void(uint64_t transferred_bytes, uint64_t transferrable_bytes);
+
+
     static FunctionType create_constructor(ContextType);
 
     // methods
@@ -158,11 +172,13 @@ public:
     static void delete_all(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
     static void write(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
     static void add_listener(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
+    static void wait_for_download_completion(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
     static void remove_listener(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
     static void remove_all_listeners(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
     static void close(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
 
     // properties
+    static void get_empty(ContextType, ObjectType, ReturnValue &);
     static void get_path(ContextType, ObjectType, ReturnValue &);
     static void get_schema_version(ContextType, ObjectType, ReturnValue &);
     static void get_schema(ContextType, ObjectType, ReturnValue &);
@@ -173,6 +189,8 @@ public:
 
     // static methods
     static void constructor(ContextType, ObjectType, size_t, const ValueType[]);
+    static SharedRealm create_shared_realm(ContextType, realm::Realm::Config, bool, ObjectDefaultsMap &&, ConstructorMap &&);
+
     static void schema_version(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
     static void clear_test_state(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
     static void copy_bundled_realm_files(ContextType, FunctionType, ObjectType, size_t, const ValueType[], ReturnValue &);
@@ -187,6 +205,7 @@ public:
         {"schemaVersion", wrap<schema_version>},
         {"clearTestState", wrap<clear_test_state>},
         {"copyBundledRealmFiles", wrap<copy_bundled_realm_files>},
+        {"_waitForDownload", wrap<wait_for_download_completion>},
     };
 
     PropertyMap<T> const static_properties = {
@@ -207,6 +226,7 @@ public:
     };
 
     PropertyMap<T> const properties = {
+        {"empty", {wrap<get_empty>, nullptr}},
         {"path", {wrap<get_path>, nullptr}},
         {"schemaVersion", {wrap<get_schema_version>, nullptr}},
         {"schema", {wrap<get_schema>, nullptr}},
@@ -225,9 +245,7 @@ public:
         return name;
     }
 
-    static const ObjectSchema& validated_object_schema_for_value(ContextType ctx, const SharedRealm &realm, const ValueType &value) {
-        std::string object_type;
-
+    static const ObjectSchema& validated_object_schema_for_value(ContextType ctx, const SharedRealm &realm, const ValueType &value, std::string& object_type) {
         if (Value::is_constructor(ctx, value)) {
             FunctionType constructor = Value::to_constructor(ctx, value);
 
@@ -245,6 +263,9 @@ public:
         }
         else {
             object_type = Value::validated_to_string(ctx, value, "objectType");
+            if (object_type.empty()) {
+                throw std::runtime_error("objectType cannot be empty");
+            }
         }
 
         auto &schema = realm->schema();
@@ -254,13 +275,6 @@ public:
             throw std::runtime_error("Object type '" + object_type + "' not found in schema.");
         }
         return *object_schema;
-    }
-
-    static std::string normalize_path(std::string path) {
-        if (path.size() && path[0] != '/' && path[0] != '.') {
-            return default_realm_file_directory() + "/" + path;
-        }
-        return path;
     }
 };
 
@@ -318,8 +332,8 @@ static inline void convert_outdated_datetime_columns(const SharedRealm &realm) {
 template<typename T>
 void RealmClass<T>::constructor(ContextType ctx, ObjectType this_object, size_t argc, const ValueType arguments[]) {
     realm::Realm::Config config;
-    typename Schema<T>::ObjectDefaultsMap defaults;
-    typename Schema<T>::ConstructorMap constructors;
+    ObjectDefaultsMap defaults;
+    ConstructorMap constructors;
     bool schema_updated = false;
 
     if (argc == 0) {
@@ -332,6 +346,13 @@ void RealmClass<T>::constructor(ContextType ctx, ObjectType this_object, size_t 
         }
         else if (Value::is_object(ctx, value)) {
             ObjectType object = Value::validated_to_object(ctx, value);
+
+            static const String encryption_key_string = "encryptionKey";
+            ValueType encryption_key_value = Object::get_property(ctx, object, encryption_key_string);
+            if (!Value::is_undefined(ctx, encryption_key_value)) {
+                auto encryption_key = Value::validated_to_binary(ctx, encryption_key_value, "encryptionKey");
+                config.encryption_key.assign(encryption_key.data(), encryption_key.data() + encryption_key.size());
+            }
 
 #if REALM_ENABLE_SYNC
             SyncClass<T>::populate_sync_config(ctx, Value::validated_to_object(ctx, Object::get_global(ctx, "Realm")), object, config);
@@ -396,25 +417,30 @@ void RealmClass<T>::constructor(ContextType ctx, ObjectType this_object, size_t 
                     realm_ptr->reset();
                 };
             }
-
-            static const String encryption_key_string = "encryptionKey";
-            ValueType encryption_key_value = Object::get_property(ctx, object, encryption_key_string);
-            if (!Value::is_undefined(ctx, encryption_key_value)) {
-                std::string encryption_key = NativeAccessor::to_binary(ctx, encryption_key_value);
-                config.encryption_key = std::vector<char>(encryption_key.begin(), encryption_key.end());
-            }
         }
     }
     else {
         throw std::runtime_error("Invalid arguments when constructing 'Realm'");
     }
 
-    config.path = normalize_path(config.path);
+    config.path = normalize_realm_path(config.path);
     ensure_directory_exists_for_file(config.path);
 
-    config.execution_context = reinterpret_cast<AbstractExecutionContextID>(Context<T>::get_execution_context_id(ctx));
+    auto realm = create_shared_realm(ctx, config, schema_updated, std::move(defaults), std::move(constructors));
+
+    // Fix for datetime -> timestamp conversion
+    convert_outdated_datetime_columns(realm);
+
+    set_internal<T, RealmClass<T>>(this_object, new SharedRealm(realm));
+}
+
+template<typename T>
+SharedRealm RealmClass<T>::create_shared_realm(ContextType ctx, realm::Realm::Config config, bool schema_updated,
+                                        ObjectDefaultsMap && defaults, ConstructorMap && constructors) {
+    config.execution_context = Context<T>::get_execution_context_id(ctx);
 
     SharedRealm realm = realm::Realm::get_shared_realm(config);
+
     GlobalContextType global_context = Context<T>::get_global_context(ctx);
     if (!realm->m_binding_context) {
         realm->m_binding_context.reset(new RealmDelegate<T>(realm, global_context));
@@ -430,10 +456,7 @@ void RealmClass<T>::constructor(ContextType ctx, ObjectType this_object, size_t 
         js_binding_context->m_constructors = std::move(constructors);
     }
 
-    // Fix for datetime -> timestamp conversion
-    convert_outdated_datetime_columns(realm);
-
-    set_internal<T, RealmClass<T>>(this_object, new SharedRealm(realm));
+    return realm;
 }
 
 template<typename T>
@@ -441,11 +464,10 @@ void RealmClass<T>::schema_version(ContextType ctx, FunctionType, ObjectType thi
     validate_argument_count(argc, 1, 2);
 
     realm::Realm::Config config;
-    config.path = normalize_path(Value::validated_to_string(ctx, arguments[0]));
+    config.path = normalize_realm_path(Value::validated_to_string(ctx, arguments[0]));
     if (argc == 2) {
-        auto encryptionKeyValue = arguments[1];
-        std::string encryptionKey = NativeAccessor::to_binary(ctx, encryptionKeyValue);
-        config.encryption_key = std::vector<char>(encryptionKey.begin(), encryptionKey.end());
+        auto encryption_key = Value::validated_to_binary(ctx, arguments[1], "encryptionKey");
+        config.encryption_key.assign(encryption_key.data(), encryption_key.data() + encryption_key.size());
     }
 
     auto version = realm::Realm::get_schema_version(config);
@@ -482,6 +504,13 @@ void RealmClass<T>::set_default_path(ContextType ctx, ObjectType object, ValueTy
 }
 
 template<typename T>
+void RealmClass<T>::get_empty(ContextType ctx, ObjectType object, ReturnValue &return_value) {
+    SharedRealm& realm = *get_internal<T, RealmClass<T>>(object);
+    bool is_empty = ObjectStore::is_empty(realm->read_group());
+    return_value.set(is_empty);
+}
+
+template<typename T>
 void RealmClass<T>::get_path(ContextType ctx, ObjectType object, ReturnValue &return_value) {
     std::string path = get_internal<T, RealmClass<T>>(object)->get()->config().path;
     return_value.set(path);
@@ -513,18 +542,125 @@ void RealmClass<T>::get_sync_session(ContextType ctx, ObjectType object, ReturnV
     } else {
         return_value.set_null();
     }
-    
+
 }
 #endif
-    
+
+template<typename T>
+void RealmClass<T>::wait_for_download_completion(ContextType ctx, FunctionType, ObjectType this_object, size_t argc, const ValueType arguments[], ReturnValue &return_value) {
+    validate_argument_count(argc, 2);
+    auto config_object = Value::validated_to_object(ctx, arguments[0]);
+    auto callback_function = Value::validated_to_function(ctx, arguments[1]);
+
+#if REALM_ENABLE_SYNC
+    ValueType sync_config_value = Object::get_property(ctx, config_object, "sync");
+    if (!Value::is_undefined(ctx, sync_config_value)) {
+        realm::Realm::Config config;
+        config.cache = false;
+        static const String encryption_key_string = "encryptionKey";
+        ValueType encryption_key_value = Object::get_property(ctx, config_object, encryption_key_string);
+        if (!Value::is_undefined(ctx, encryption_key_value)) {
+            auto encryption_key = Value::validated_to_binary(ctx, encryption_key_value, "encryptionKey");
+            config.encryption_key.assign(encryption_key.data(), encryption_key.data() + encryption_key.size());
+        }
+        
+        Protected<ObjectType> thiz(ctx, this_object);
+        SyncClass<T>::populate_sync_config(ctx, thiz, config_object, config);
+
+        Protected<FunctionType> protected_callback(ctx, callback_function);
+        Protected<ObjectType> protected_this(ctx, this_object);
+        Protected<typename T::GlobalContext> protected_ctx(Context<T>::get_global_context(ctx));
+        
+        EventLoopDispatcher<WaitHandler> wait_handler([=](std::error_code error_code) {
+            HANDLESCOPE
+            if (!error_code) {
+                //success
+                Function<T>::callback(protected_ctx, protected_callback, protected_this, 0, nullptr);
+            }
+            else {
+                //fail
+                ObjectType object = Object::create_empty(protected_ctx);
+                Object::set_property(protected_ctx, object, "message", Value::from_string(protected_ctx, error_code.message()));
+                Object::set_property(protected_ctx, object, "errorCode", Value::from_number(protected_ctx, error_code.value()));
+
+                ValueType callback_arguments[1];
+                callback_arguments[0] = object;
+                Function<T>::callback(protected_ctx, protected_callback, protected_this, 1, callback_arguments);
+            }
+        });
+        std::function<WaitHandler> waitFunc = std::move(wait_handler);
+
+        std::function<ProgressHandler> progressFunc; 
+
+        auto realm = realm::Realm::get_shared_realm(config);
+        if (auto sync_config = config.sync_config)
+        {
+            static const String progressFuncName = "_onDownloadProgress";
+            bool progressFuncDefined = false;
+            if (!Value::is_boolean(ctx, sync_config_value) && !Value::is_undefined(ctx, sync_config_value))
+            {
+                auto sync_config_object = Value::validated_to_object(ctx, sync_config_value);
+
+                ValueType progressFuncValue = Object::get_property(ctx, sync_config_object, progressFuncName);
+                progressFuncDefined = !Value::is_undefined(ctx, progressFuncValue);
+
+                if (progressFuncDefined)
+                {
+                    Protected<FunctionType> protected_progressCallback(protected_ctx, Value::validated_to_function(protected_ctx, progressFuncValue));
+                    EventLoopDispatcher<ProgressHandler> progress_handler([=](uint64_t transferred_bytes, uint64_t transferrable_bytes) {
+                        HANDLESCOPE
+                        ValueType callback_arguments[2];
+                        callback_arguments[0] = Value::from_number(protected_ctx, transferred_bytes);
+                        callback_arguments[1] = Value::from_number(protected_ctx, transferrable_bytes);
+
+                        Function<T>::callback(protected_ctx, protected_progressCallback, protected_this, 2, callback_arguments);
+                    });
+
+                    progressFunc = std::move(progress_handler);
+                }
+            }
+
+            std::shared_ptr<SyncUser> user = sync_config->user;
+            if (user && user->state() != SyncUser::State::Error) {
+                if (auto session = user->session_for_on_disk_path(config.path)) {
+                    if (progressFuncDefined) {
+                        session->register_progress_notifier(std::move(progressFunc), SyncSession::NotifierType::download, false);
+                    } 
+                    
+                    session->wait_for_download_completion([=](std::error_code error_code) {
+                        realm->close(); //capture and keep realm instance for until here
+                        waitFunc(error_code);
+                    });
+                    return;
+                }
+            }
+
+            ObjectType object = Object::create_empty(protected_ctx);
+            Object::set_property(protected_ctx, object, "message", Value::from_string(protected_ctx, "Cannot asynchronously open synced Realm, because the associated session previously experienced a fatal error"));
+            Object::set_property(protected_ctx, object, "errorCode", Value::from_number(protected_ctx, 1));
+
+            ValueType callback_arguments[1];
+            callback_arguments[0] = object;
+            Function<T>::callback(protected_ctx, protected_callback, protected_this, 1, callback_arguments);
+            return;
+        }
+    }
+#endif
+
+    ValueType callback_arguments[1];
+    callback_arguments[0] = Value::from_null(ctx);
+    Function<T>::callback(ctx, callback_function, this_object, 1, callback_arguments);
+}
+
 template<typename T>
 void RealmClass<T>::objects(ContextType ctx, FunctionType, ObjectType this_object, size_t argc, const ValueType arguments[], ReturnValue &return_value) {
     validate_argument_count(argc, 1);
 
     SharedRealm realm = *get_internal<T, RealmClass<T>>(this_object);
-    auto &object_schema = validated_object_schema_for_value(ctx, realm, arguments[0]);
+    std::string object_type;
+    validated_object_schema_for_value(ctx, realm, arguments[0], object_type);
 
-    return_value.set(ResultsClass<T>::create_instance(ctx, realm, object_schema));
+    return_value.set(ResultsClass<T>::create_instance(ctx, realm, object_type));
 }
 
 template<typename T>
@@ -532,8 +668,10 @@ void RealmClass<T>::object_for_primary_key(ContextType ctx, FunctionType, Object
     validate_argument_count(argc, 2);
 
     SharedRealm realm = *get_internal<T, RealmClass<T>>(this_object);
-    auto &object_schema = validated_object_schema_for_value(ctx, realm, arguments[0]);
-    auto realm_object = realm::Object::get_for_primary_key(ctx, realm, object_schema, arguments[1]);
+    std::string object_type;
+    auto &object_schema = validated_object_schema_for_value(ctx, realm, arguments[0], object_type);
+    NativeAccessor accessor(ctx, realm, object_schema);
+    auto realm_object = realm::Object::get_for_primary_key(accessor, realm, object_schema, arguments[1]);
 
     if (realm_object.is_valid()) {
         return_value.set(RealmObjectClass<T>::create_instance(ctx, std::move(realm_object)));
@@ -548,7 +686,8 @@ void RealmClass<T>::create(ContextType ctx, FunctionType, ObjectType this_object
     validate_argument_count(argc, 2, 3);
 
     SharedRealm realm = *get_internal<T, RealmClass<T>>(this_object);
-    auto &object_schema = validated_object_schema_for_value(ctx, realm, arguments[0]);
+    std::string object_type;
+    auto &object_schema = validated_object_schema_for_value(ctx, realm, arguments[0], object_type);
 
     ObjectType object = Value::validated_to_object(ctx, arguments[1], "properties");
     if (Value::is_array(ctx, arguments[1])) {
@@ -560,7 +699,8 @@ void RealmClass<T>::create(ContextType ctx, FunctionType, ObjectType this_object
         update = Value::validated_to_boolean(ctx, arguments[2], "update");
     }
 
-    auto realm_object = realm::Object::create<ValueType>(ctx, realm, object_schema, object, update);
+    NativeAccessor accessor(ctx, realm, object_schema);
+    auto realm_object = realm::Object::create<ValueType>(accessor, realm, object_schema, object, update);
     return_value.set(RealmObjectClass<T>::create_instance(ctx, std::move(realm_object)));
 }
 
@@ -580,7 +720,7 @@ void RealmClass<T>::delete_one(ContextType ctx, FunctionType, ObjectType this_ob
         if (!object->is_valid()) {
             throw std::runtime_error("Object is invalid. Either it has been previously deleted or the Realm it belongs to has been closed.");
         }
-        
+
         realm::TableRef table = ObjectStore::table_for_object_type(realm->read_group(), object->get_object_schema().name);
         table->move_last_over(object->row().get_index());
     }
